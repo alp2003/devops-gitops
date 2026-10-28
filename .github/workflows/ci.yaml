@@ -25,7 +25,7 @@ jobs:
             - name: gitleaks (full history)
               run: |
                   docker run --rm -v "$PWD:/repo" "zricethezav/gitleaks:${GITLEAKS_VERSION}" \
-                    detect --source /repo --redact -v
+                    detect --source /repo --redact --no-color -v
 
     chart-checks:
         name: Chart lint and scan
