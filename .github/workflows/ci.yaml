@@ -1,45 +1,61 @@
 name: ci
 
 on:
-    pull_request:
-    push:
-        branches: [main]
+  pull_request:
+  push:
+    branches: [main]
 
 # Least privilege for the whole workflow: read-only token
 permissions:
-    contents: read
+  contents: read
 
 env:
-    GITLEAKS_VERSION: "v8.30.1"
-    TRIVY_VERSION: "0.76.1"
+  GITLEAKS_VERSION: "v8.30.1"
+  TRIVY_VERSION: "0.76.1"
 
 jobs:
-    secret-scan:
-        name: Secret scan
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  fetch-depth: 0 # full history, so old commits are scanned too
-                  persist-credentials: false # don't leave the Git token on disk for later steps
-            - name: gitleaks (full history)
-              run: |
-                  docker run --rm -v "$PWD:/repo" "zricethezav/gitleaks:${GITLEAKS_VERSION}" \
-                    detect --source /repo --redact --no-color -v
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history, so old commits are scanned too
+          persist-credentials: false # don't leave the Git token on disk for later steps
+      - name: gitleaks (full history)
+        run: |
+          docker run --rm -v "$PWD:/repo" "zricethezav/gitleaks:${GITLEAKS_VERSION}" \
+            detect --source /repo --redact --no-color -v
 
-    chart-checks:
-        name: Chart lint and scan
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  persist-credentials: false
-            - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
-            - name: helm lint
-              run: helm lint apps/web
-            - name: helm template
-              run: helm template web apps/web > /dev/null
-            - name: trivy config scan
-              run: |
-                  docker run --rm -v "$PWD:/src" "aquasec/trivy:${TRIVY_VERSION}" \
-                    config --exit-code 1 --ignorefile /src/.trivyignore /src/apps/web
+  chart-checks:
+    name: Chart lint and scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - name: helm lint
+        run: helm lint apps/web
+      - name: helm template
+        run: helm template web apps/web > /dev/null
+      - name: trivy config scan
+        run: |
+          docker run --rm -v "$PWD:/src" "aquasec/trivy:${TRIVY_VERSION}" \
+            config --exit-code 1 --ignorefile /src/.trivyignore /src/apps/web
+
+  aws-oidc:
+    name: AWS via OIDC
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [secret-scan, chart-checks]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # allows requesting the OIDC token, for this job only
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Who am I?
+        run: aws sts get-caller-identity
